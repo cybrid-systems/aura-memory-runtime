@@ -1,0 +1,4 @@
+[submodule "third_party/aura"]
+	path = third_party/aura
+	url = https://github.com/cybrid-systems/aura
+	shallow = true

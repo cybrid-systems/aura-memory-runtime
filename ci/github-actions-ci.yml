@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    # Same toolchain image as cybrid-systems/aura CI (GCC 16, C++26 contracts).
+    container:
+      image: ghcr.io/cybrid-systems/dev:v1.0.9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j"$(nproc)"
+      - name: Test output (claims evidence)
+        if: always()
+        run: for t in build/test_*; do "$t" || true; done
+      - name: Bench
+        run: ./build/amr_bench | tee bench.md && cat bench.md >> "$GITHUB_STEP_SUMMARY"
