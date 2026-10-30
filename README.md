@@ -67,14 +67,14 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 
 没能用上，需要自己补的部分：
 
-- **F1：PCV 不能同时实例化两种元素类型。** 类内 friend 模板 `share_storage<U>` 会在每次实例化时重复定义，GCC 16 报 `redefinition`。因此只能用 `PCV<uint32_t>`，节点改为放进 NodeId 池。
-- **F2：PCV `with_set() const` 在 `use_count()==1` 时原地修改接收者**（#2140 引入的快速路径），这和头文件注释“不修改接收者”的承诺相矛盾，属于 COW 陷阱。`RuleSet::with_upsert` 先做本地拷贝再修改来规避；`test_cow_sharing.aura_pcv_with_set_mutates_unique_receiver_in_place` 记录了这一行为。
-- **F3：`serve/fiber.{h,cpp}` 的 `Fiber` 无法单独链接**，它依赖 Evaluator、GC、mailbox 等。Aura 也没有可嵌入的库目标，规则和 workspace 引擎只能在解释器里跑。所以本仓库自己写了一个 ucontext fiber，但沿用 Aura 的 Context。
-- **F4：overlay 的冲突基线是 `begin()` 时刻的 registry seq，而不是历史快照**，所以从旧快照开出的 worldline 会漏掉“快照之后、begin 之前”发生的提交。本仓库额外加了一层 `rule_modified_at` 检查（陈旧快照守卫）。
-- **F5：overlay 的 `commit()` 没有 prepare / validate-only 阶段。** 冲突扫描、apply 和写 commit log 在一次调用里完成，没法做到“先校验，再持久化写日志，再发布”。目前只能在 commit 之后写 `WlPromote`；如果日志写入失败（不是进程崩溃），registry 里会留下幽灵 claim。
+- **F1：PCV 不能同时实例化两种元素类型。** 类内 friend 模板 `share_storage<U>` 会在每次实例化时重复定义，GCC 16 报 `redefinition`。因此只能用 `PCV<uint32_t>`，节点改为放进 NodeId 池。（上游：cybrid-systems/aura#4769）
+- **F2：PCV `with_set() const` 在 `use_count()==1` 时原地修改接收者**（#2140 引入的快速路径），这和头文件注释“不修改接收者”的承诺相矛盾，属于 COW 陷阱。`RuleSet::with_upsert` 先做本地拷贝再修改来规避；`test_cow_sharing.aura_pcv_with_set_mutates_unique_receiver_in_place` 记录了这一行为。（上游：cybrid-systems/aura#4770）
+- **F3：`serve/fiber.{h,cpp}` 的 `Fiber` 无法单独链接**，它依赖 Evaluator、GC、mailbox 等。Aura 也没有可嵌入的库目标，规则和 workspace 引擎只能在解释器里跑。所以本仓库自己写了一个 ucontext fiber，但沿用 Aura 的 Context。（上游：cybrid-systems/aura#4774）
+- **F4：overlay 的冲突基线是 `begin()` 时刻的 registry seq，而不是历史快照**，所以从旧快照开出的 worldline 会漏掉“快照之后、begin 之前”发生的提交。本仓库额外加了一层 `rule_modified_at` 检查（陈旧快照守卫）。（上游：cybrid-systems/aura#4771）
+- **F5：overlay 的 `commit()` 没有 prepare / validate-only 阶段。** 冲突扫描、apply 和写 commit log 在一次调用里完成，没法做到“先校验，再持久化写日志，再发布”。目前只能在 commit 之后写 `WlPromote`；如果日志写入失败（不是进程崩溃），registry 里会留下幽灵 claim。（上游：cybrid-systems/aura#4771）
 - **F6：overlay 只存在于内存**，没有持久化和重放。这对 Stage 1 没有影响，因为恢复时开放的 worldline 一律丢弃。
-- **F7：`ast:snapshot` 是整份 workspace 的 unparse 加深拷贝**，只有源码完全相同时才共享（#4598 phase 3），不是结构化 COW，所以不能直接充当 O(1) worldline 分叉。本仓库在 C++ 层用 PCV 实现了 O(1) 分叉。
-- **F8：CI 镜像 `dev:v1.0.9` 里的 `/usr/local/bin/ld.lld` 无法运行**，缺少 `libicui18n.so.70`，所以只能用 bfd ld。
+- **F7：`ast:snapshot` 是整份 workspace 的 unparse 加深拷贝**，只有源码完全相同时才共享（#4598 phase 3），不是结构化 COW，所以不能直接充当 O(1) worldline 分叉。本仓库在 C++ 层用 PCV 实现了 O(1) 分叉。（上游：cybrid-systems/aura#4772）
+- **F8：CI 镜像 `dev:v1.0.9` 里的 `/usr/local/bin/ld.lld` 无法运行**，缺少 `libicui18n.so.70`，所以只能用 bfd ld。（上游：cybrid-systems/aura#4773）
 
 ## 基准（`bench/bench.cpp`，dev:v1.0.9 容器，本地 x86_64）
 
