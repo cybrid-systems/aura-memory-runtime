@@ -101,7 +101,7 @@ worldline 分叉的开销与规则数无关，规则从 10 条增加到 10000 �
 3. 冲突检测需要两层：Aura overlay 负责 worldline 之间的先提交者赢，`rule_modified_at` 负责主线在快照之后的修改（F4）。
 4. 质量门必须放在成本门之前。在宽时间窗下，删掉 ts 过滤的坏规则在 Rank-by-recency 之下会显得无害，质量仍是 1.0，成本也略有下降，这时会被误 promote。只有在近时间窗的负载下它的质量才掉到 0.208。所以**反馈负载的覆盖面决定了 gate 是否可信**，这一点也和 aura-memory 的 held-out gate 结论一致。
 5. Join/Relate 的语义（把关联行带进上下文，还是只做半连接过滤）必须在 EDSL 层写死。本原型选择前者。
-6. Aura 自带的 EDSL 设施（宏、`std/rule`）的验证探针在 `tests/aura_edsl/`：`define-hygienic-macro` 的卫生语义和展开性能都达标；宏参数个数不检查、`eval` 吞掉未绑定名字、`std/rule` 不校验输入且 `rule:define` 为 O(n²)，已分别报到上游 aura#4833–#4836，均已在 a029752df 修复并复验。仍有一个问题：默认（生产 STRICT）配置下宏定义一律被拒，探针要设 `AURA_PIPELINE_STRICT=0` 才能运行（aura#4846）。本仓库的规则 EDSL 是 C++ 实现，不依赖这些设施。
+6. Aura 自带的 EDSL 设施（宏、`std/rule`）的验证探针在 `tests/aura_edsl/`：`define-hygienic-macro` 的卫生语义和展开性能都达标；宏参数个数不检查、`eval` 吞掉未绑定名字、`std/rule` 不校验输入且 `rule:define` 为 O(n²)，已分别报到上游 aura#4833–#4836，均已在 a029752df 修复并复验。默认（生产 STRICT）配置下宏定义被拒的问题（aura#4846）已在 735135de6 修复；同一版本里卫生宏调用出现严重性能回归（2 万次约 71s，之前约 51ms，aura#4857），`std/rule` 探针在默认配置下仍报 `tree-walker fallback forbidden`（aura#4848）。本仓库的规则 EDSL 是 C++ 实现，不依赖这些设施。
 
 ## 未解决的风险
 
