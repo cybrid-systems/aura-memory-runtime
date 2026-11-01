@@ -1,0 +1,14 @@
+;; std/rule 规则 EDSL 输入校验、错误信息与 rule:define 性能探针。当前行为见 cybrid-systems/aura#4835。
+(require "std/rule" all:)
+(define (probe tag th) (display tag) (display " => ") (display (try (th) (catch (e) (list 'caught (format "~a" e))))) (newline))
+;; rule EDSL error messages
+(probe "typo-keyword" (lambda () (rule:define 'r1 :patern "(+ ?a 0)" :replace "?a")))
+(probe "typo-status" (lambda () (rule:status 'r1)))
+(probe "odd-args" (lambda () (rule:define 'r2 :pattern)))
+(probe "bad-pattern-type" (lambda () (rule:define 'r3 :pattern 42 :replace "?a")))
+(probe "apply-bad-pattern" (lambda () (rule:apply 'r3)))
+(probe "apply-unknown" (lambda () (rule:apply 'nope)))
+(probe "enable-unknown" (lambda () (rule:enable 'nope)))
+(define t0 (current-time-ms))
+(let loop ((i 0)) (if (< i 2000) (begin (rule:define (string->symbol (format "p~a" i)) :pattern "(+ ?a 0)" :replace "?a") (loop (+ i 1)))))
+(display (list 'rule-define-2000-ms (- (current-time-ms) t0) 'count (length (rule:list)))) (newline)

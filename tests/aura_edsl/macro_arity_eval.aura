@@ -1,0 +1,11 @@
+;; 宏参数个数与 eval 未绑定名字探针。当前行为见 cybrid-systems/aura#4834、#4833。
+(define (probe tag th) (display tag) (display " => ") (display (try (th) (catch (e) (list 'caught (format "~a" e))))) (newline))
+(define-hygienic-macro (or2-h a b) (let ((t a)) (if t t b)))
+(defmacro (dm2 a b) (list '+ a b))
+(probe "hyg-too-few" (lambda () (or2-h 1)))
+(probe "hyg-too-few-false" (lambda () (or2-h #f)))
+(probe "hyg-too-many" (lambda () (or2-h #f 2 3)))
+(probe "defmacro-too-few" (lambda () (dm2 1)))
+(probe "defmacro-too-many" (lambda () (dm2 1 2 3)))
+(probe "eval-unbound-call" (lambda () (eval '(no-such-fn 1))))
+(probe "eval-unbound-var" (lambda () (eval 'no-such-var)))
