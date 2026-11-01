@@ -41,7 +41,7 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 | + | 规则是可以查询的数据，EDSL 语义正确 | `test_rules_engine` | S-expr 往返；模式绑定；按 tier 查询规则；optimize 到达不动点并且幂等；never-auto 安全规则会屏蔽 secret；Join/Relate 和 token 预算生效 | ✅ |
 | + | tier、上限与冲突 | `test_tiers_and_limits` | never-auto 规则既不能改也不能删，实验也不能新建 never-auto 规则；needs-confirm 需要 `confirmed=true`；超过活跃 worldline 上限时抛出 `WorldlineLimit`；两个 worldline 改同一规则时先提交者赢，后者被 abort；主线在快照之后改了同名规则时 promote 冲突，改无关规则不冲突；来自未来的快照会被拒绝 | ✅ |
 
-最近一次本地运行（dev:v1.0.9，GCC 16.2）：**8/8 个 ctest 通过，约 3290 个检查，0 个失败**。
+最近一次本地运行（dev:v1.0.9，GCC 16.2）：**8/8 个 ctest 通过，约 3290 个检查，0 个失败**（Aura pin 升到 7bb2ed954、dev:v1.1.1 后：9/9 通过，新增 `test_soak_worldlines`）。
 
 ## 组件
 
@@ -68,7 +68,7 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 没能用上，需要自己补的部分：
 
 - **F1：PCV 不能同时实例化两种元素类型。** 类内 friend 模板 `share_storage<U>` 会在每次实例化时重复定义，GCC 16 报 `redefinition`。因此只能用 `PCV<uint32_t>`，节点改为放进 NodeId 池。（上游：cybrid-systems/aura#4769）
-- **F2：PCV `with_set() const` 在 `use_count()==1` 时原地修改接收者**（#2140 引入的快速路径），这和头文件注释“不修改接收者”的承诺相矛盾，属于 COW 陷阱。`RuleSet::with_upsert` 先做本地拷贝再修改来规避；`test_cow_sharing.aura_pcv_with_set_mutates_unique_receiver_in_place` 记录了这一行为。（上游：cybrid-systems/aura#4770）
+- **F2（上游已修，cybrid-systems/aura#4770）：PCV `with_set() const` 曾在 `use_count()==1` 时原地修改接收者**（#2140 引入的快速路径）。当前 pin 上接收者保持不变，`test_cow_sharing.aura_pcv_with_set_leaves_unique_receiver_untouched` 断言这一点；`RuleSet::with_upsert` 的本地拷贝保留为防御。
 - **F3：`serve/fiber.{h,cpp}` 的 `Fiber` 无法单独链接**，它依赖 Evaluator、GC、mailbox 等。Aura 也没有可嵌入的库目标，规则和 workspace 引擎只能在解释器里跑。所以本仓库自己写了一个 ucontext fiber，但沿用 Aura 的 Context。（上游：cybrid-systems/aura#4774）
 - **F4：overlay 的冲突基线是 `begin()` 时刻的 registry seq，而不是历史快照**，所以从旧快照开出的 worldline 会漏掉“快照之后、begin 之前”发生的提交。本仓库额外加了一层 `rule_modified_at` 检查（陈旧快照守卫）。（上游：cybrid-systems/aura#4771）
 - **F5：overlay 的 `commit()` 没有 prepare / validate-only 阶段。** 冲突扫描、apply 和写 commit log 在一次调用里完成，没法做到“先校验，再持久化写日志，再发布”。目前只能在 commit 之后写 `WlPromote`；如果日志写入失败（不是进程崩溃），registry 里会留下幽灵 claim。（上游：cybrid-systems/aura#4771）
@@ -105,7 +105,7 @@ worldline 分叉的开销与规则数无关，规则从 10 条增加到 10000 �
 ## 未解决的风险
 
 - **R1：单进程、单 writer**，没有多进程锁和组提交（group commit）。每条 fsync 的吞吐只有约 4k/s。
-- **R2：节点池只追加不回收**，长时间跑的实验会让它一直增长，需要 epoch 或引用计数 GC。
+- **R2：节点池只追加不回收**，长时间跑的实验会让它一直增长，需要 epoch 或引用计数 GC。`test_soak_worldlines` 实测（1500 个 worldline 生命周期，Aura 7bb2ed954 pin）：每个生命周期新增约 87 个节点、约 45 KB 常驻内存，线性增长不回落；日志重放和重新打开后的状态 digest 与内存状态一致。
 - **R3：checkpoint 序列化的是完整热状态**，在这个基准里并不比重放快（66 ms 对 63 ms），只有日志中删除和覆盖操作较多时才有优势。需要增量 checkpoint 或 LSM 化。
 - **R4：质量度量是与基线结果的 F1**，只适用于“等价改写”类规则。真正改变语义的规则需要人工标注的 held-out 集。
 - **R5：fiber 是协作式的**，`run_queries` 在单线程内交替执行，并没有利用多核（Aura #4707 也有类似问题）。

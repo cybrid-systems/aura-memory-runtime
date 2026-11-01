@@ -95,15 +95,18 @@ TEST(optimizer_rewrite_shares_untouched_subtrees) {
     CHECK(count_nodes(plan) == a.size()); // original plan is intact (persistent)
 }
 
-TEST(aura_pcv_with_set_mutates_unique_receiver_in_place) {
-    // Documented hazard (finding F2): Aura PCV `with_set() const` takes an
-    // in-place fast path when the buffer is uniquely owned (Issue #2140),
-    // so the *receiver* changes. RuleSet::with_upsert guards against it.
+TEST(aura_pcv_with_set_leaves_unique_receiver_untouched) {
+    // Finding F2 (cybrid-systems/aura#4770, fixed upstream): PCV `with_set()
+    // const` used to take an in-place fast path on a uniquely owned buffer
+    // (Issue #2140) and change the *receiver*. On the current pin the
+    // receiver must stay untouched even when it is the only owner.
     Kids k;
     k = k.with_push_back(1).with_push_back(2).with_push_back(3);
     Kids k2 = k.with_set(0, 9);
     const bool in_place = (k[0] == 9);
     std::printf("    PCV with_set on unique buffer mutated receiver: %s\n", in_place ? "YES" : "no");
+    CHECK(!in_place);
+    CHECK(k[0] == 1);
     CHECK(k2[0] == 9);
 
     RuleSet rs;

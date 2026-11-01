@@ -38,7 +38,7 @@ target_compile_options(amr PUBLIC -fcontracts -Wall -Wextra)
 enable_testing()
 foreach(t test_main_line_isolation test_abort_no_trace test_torn_writes
           test_hot_state_replay test_cow_sharing test_promote_improves
-          test_rules_engine test_tiers_and_limits)
+          test_rules_engine test_tiers_and_limits test_soak_worldlines)
   add_executable(${t} tests/${t}.cpp)
   target_link_libraries(${t} PRIVATE amr)
   add_test(NAME ${t} COMMAND ${t})
