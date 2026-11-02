@@ -1,6 +1,6 @@
 # Aura EDSL 探针
 
-用 aura CLI 运行（`AURA_PATH=<aura>/lib aura --load <file>.aura`），输出每个 probe 的实际结果。aura d44d1077e 上默认（生产 STRICT）配置下只有 `--load` 能跑：直接 `aura <file>.aura` 时 `macro_hygiene.aura` 和 `rule_edsl_errors.aura` 整体报 `tree-walker fallback forbidden`（aura#4864；735135de6 上卫生宏直接运行是正常的，属回归），用 `--load` 或 `AURA_PIPELINE_STRICT=0` 都正常。不进 ctest：这些脚本记录的是上游当前行为，不是本仓库的断言。
+用 aura CLI 运行（`AURA_PATH=<aura>/lib aura --load <file>.aura` 或直接 `aura <file>.aura`），输出每个 probe 的实际结果。aura 217a7690e 起默认（生产 STRICT）配置下 `--load` 和直接运行都能跑全部探针（aura#4864 已修；d44d1077e 上直接运行会报 `tree-walker fallback forbidden`）。不进 ctest：这些脚本记录的是上游当前行为，不是本仓库的断言。
 
 | 文件 | 内容 | 结论（main a029752df，dev:v1.1.1；括号里是 76dc312cd 时的结果；735135de6 复验见表下） |
 |---|---|---|
@@ -11,5 +11,7 @@
 735135de6 复验（dev:v1.1.1）：三个探针语义结果与上表相同，默认配置和 `STRICT=0` 一致（`rule_edsl_errors` 只能在 `STRICT=0` 下跑，aura#4848）。性能回归：`macro_hygiene` 的 2 万次卫生宏调用从约 51ms 变成约 71s（手写代码仍约 51ms），2000 次调用 5ms → 1762ms，随调用次数超线性增长（aura#4857）。`rule:define` 2000 条约 211ms，不变。
 
 d44d1077e 复验（dev:v1.1.1，`STRICT=0`）：三个探针语义结果与上表相同。卫生宏性能回归已修：2 万次调用约 53ms（手写约 51ms）；但同一文件里只要出现过 `defmacro`，卫生宏调用仍超线性变慢（2000 次 744ms，4000 次 5.6s，aura#4857 已补复现）。`rule:define` 2000 条约 199ms。`macro_arity_eval` 在默认配置下直接运行也正常。
+
+217a7690e 复验（dev:v1.1.1，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果与上表相同。卫生宏性能已完全恢复，2 万次调用 56–69ms，与手写代码相同；与 `defmacro` 同文件时 2000 次 5ms、4000 次 10ms（aura#4857 已修）。`rule:define` 2000 条约 230ms。
 
 另外：`std/INDEX` 不再宣称支持 `syntax-rules`；`define-syntax` / `syntax-rules` 未绑定时会提示改用 `define-hygienic-macro`（aura#4836，已修）。`defmacro` 是过程式、非卫生的宏（按设计），需要卫生时用 `define-hygienic-macro`。
