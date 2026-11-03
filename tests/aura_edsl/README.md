@@ -19,3 +19,5 @@ d44d1077e 复验（dev:v1.1.1，`STRICT=0`）：三个探针语义结果与上�
 bf93198e3 复验（dev:v1.1.1，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果不变；卫生宏 2 万次调用 54–58ms，与手写代码相同；`rule:define` 2000 条 251–279ms。ctest 9/9（仍用仓库固定的 aura 7bb2ed9）。
 
 04c69b1b5 复验（dev:v1.1.1，`AURA_SANDBOX=off`，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果不变；卫生宏 2 万次调用 51–54ms，与手写代码相同；`rule:define` 2000 条 217–218ms。生产默认（不设 `AURA_SANDBOX`，即 Restricted）下：`macro_hygiene` 失败，宏一展开就报 `internal error: capability-deny`，`aura soft` 也一样（cybrid-systems/aura#4876）；`rule_edsl_errors` 在 `hash-set!` 处被 Mutate 拒绝，这是 Restricted 的设计，用 `aura soft` 运行可通过；`macro_arity_eval` 通过。ctest 9/9（仍用仓库固定的 aura 7bb2ed9）。
+
+420b8d577 复验（dev:v1.1.1，`AURA_SANDBOX=off`，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果不变。卫生宏 2 万次调用 48–50ms，与手写代码相同；`rule:define` 2000 条 200–206ms。生产默认（不设 `AURA_SANDBOX`）下，`macro_hygiene` 失败，但现在报的是可操作的 `effect-denied: macro-self-evo not granted ... run with AURA_SANDBOX=off`，这是设计行为（cybrid-systems/aura#4876；`defmacro` 和在 `eval` 里展开时仍是裸的 `capability-deny`，该 issue 已重开）。`rule_edsl_errors` 仍在 `hash-set!` 处被 Mutate 拒绝，这也是设计行为。ctest 9/9（仍用仓库固定的 aura 7bb2ed9）。
