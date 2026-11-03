@@ -17,3 +17,5 @@ d44d1077e 复验（dev:v1.1.1，`STRICT=0`）：三个探针语义结果与上�
 另外：`std/INDEX` 不再宣称支持 `syntax-rules`；`define-syntax` / `syntax-rules` 未绑定时会提示改用 `define-hygienic-macro`（aura#4836，已修）。`defmacro` 是过程式、非卫生的宏（按设计），需要卫生时用 `define-hygienic-macro`。
 
 bf93198e3 复验（dev:v1.1.1，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果不变；卫生宏 2 万次调用 54–58ms，与手写代码相同；`rule:define` 2000 条 251–279ms。ctest 9/9（仍用仓库固定的 aura 7bb2ed9）。
+
+04c69b1b5 复验（dev:v1.1.1，`AURA_SANDBOX=off`，默认配置与 `STRICT=0`，直接运行）：三个探针语义结果不变；卫生宏 2 万次调用 51–54ms，与手写代码相同；`rule:define` 2000 条 217–218ms。生产默认（不设 `AURA_SANDBOX`，即 Restricted）下：`macro_hygiene` 失败，宏一展开就报 `internal error: capability-deny`，`aura soft` 也一样（cybrid-systems/aura#4876）；`rule_edsl_errors` 在 `hash-set!` 处被 Mutate 拒绝，这是 Restricted 的设计，用 `aura soft` 运行可通过；`macro_arity_eval` 通过。ctest 9/9（仍用仓库固定的 aura 7bb2ed9）。
