@@ -3,11 +3,14 @@
 // The search is NOT implemented here. Aura owns the MOEA/D state, the
 // Das-Dennis weights, the Tchebycheff scalarisation and the neighbourhood
 // update; this file only carries the ask/tell boundary and the rule-set
-// encoding. Aura exposes no evaluator ABI (docs/embedding.md: only
-// aura::core / aura::fiber_rt are linkable, neither contains the Evaluator),
-// so the boundary is Aura's compiler-session protocol:
+// encoding.
 //
-//     aura --serve   (one JSON reply per line, session state persists)
+// Two transports (#4946):
+//   in-process (default when built with -DAMR_AURA_INPROC=ON): Aura's
+//       aura_eval_* C ABI (eval/aura_eval.h), one session in this process;
+//   subprocess fallback (AMR_EVO_TRANSPORT=serve, or EvoConfig::in_process
+//       = false): 'aura --serve', one JSON reply per line. Same
+//       S-expressions and value strings, so the evo code does not care.
 //
 // The session runs the module's own prelude:
 //     (require "std/list" all:) (require "std/math" all:)
@@ -51,6 +54,9 @@ struct EvoConfig {
     int candidates_per_gen = 5;
     int generations = 4;
     double min_quality = 1.0;  // F1 gate, checked before any objective gate
+    // #4946: run std/moead in this process through aura::eval. AMR_EVO_TRANSPORT=serve
+    // (or a build without -DAMR_AURA_INPROC=ON) falls back to 'aura --serve'.
+    bool in_process = true;
 };
 
 struct EvoCandidate {
@@ -96,9 +102,10 @@ struct EvoRunReport {
     [[nodiscard]] std::string transcript() const;
 };
 
-// A long-lived `aura --serve` session running std/moead. ask/tell never
+// A long-lived Aura session running std/moead — in-process through
+// aura::eval by default, or `aura --serve` as the fallback. ask/tell never
 // reimplement the algorithm: they send one S-expression and read one JSON
-// reply.
+// reply, and both transports answer in the same value shape.
 class AuraEvoSession {
 public:
     AuraEvoSession(std::string bin, const EvoConfig& cfg);
@@ -114,7 +121,14 @@ private:
     std::string command(const std::string& expr);  // returns the reply value
     void send(const std::string& expr);
     std::string read_line(int timeout_ms);
+    void open_serve(std::string bin, const EvoConfig& cfg);
+    void open_inproc(const EvoConfig& cfg);
+    void prelude(const EvoConfig& cfg);
+    std::string command_inproc(const std::string& expr);
 
+    // aura_eval_session* when the in-process ABI is linked, else nullptr.
+    // Kept as void* so this header stays Aura-free.
+    void* session_ = nullptr;
     std::string bin_;
     int in_fd_ = -1;
     int out_fd_ = -1;

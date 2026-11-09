@@ -21,6 +21,17 @@ std::string aura_bin() {
 
 bool have_aura(const std::string& b) { return ::access(b.c_str(), X_OK) == 0; }
 
+// #4946: with the in-process transport the test needs no aura binary at all —
+// that is the point of the ABI.
+bool evo_available(const std::string& b) {
+#ifdef AMR_HAVE_AURA_EVAL
+    (void)b;
+    return true;
+#else
+    return have_aura(b);
+#endif
+}
+
 std::vector<Intent> evo_workload(int n) {
     auto qs = tk::workload(n);
     for (std::size_t i = 0; i < qs.size(); ++i)
@@ -58,7 +69,7 @@ EvoConfig cfg_for(const std::string& bin, int gens, int k) {
 
 TEST(moead_ask_tell_is_deterministic_for_a_fixed_seed) {
     const std::string bin = aura_bin();
-    if (!have_aura(bin)) {
+    if (!evo_available(bin)) {
         std::printf("    SKIP: no aura binary (set AMR_AURA_BIN)\n");
         return;
     }
@@ -82,7 +93,7 @@ TEST(moead_ask_tell_is_deterministic_for_a_fixed_seed) {
 
 TEST(moead_run_promotes_only_pareto_improvements) {
     const std::string bin = aura_bin();
-    if (!have_aura(bin)) {
+    if (!evo_available(bin)) {
         std::printf("    SKIP: no aura binary (set AMR_AURA_BIN)\n");
         return;
     }

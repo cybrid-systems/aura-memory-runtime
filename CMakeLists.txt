@@ -11,16 +11,43 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-set(AURA_SRC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/aura/src)
+set(AURA_SRC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/aura/src
+    CACHE PATH "Aura src/ tree (third_party/aura by default; point it at a worktree to pick up aura::eval)")
 if(NOT EXISTS ${AURA_SRC}/core/persistent_child_vector.hh)
-  message(FATAL_ERROR "third_party/aura missing: run `git submodule update --init --depth 1`")
+  message(FATAL_ERROR "Aura sources missing at ${AURA_SRC}: run `git submodule update --init --depth 1`")
 endif()
 
-# Issue #4946: std/evo-core + std/moead live in Aura, not here. The runtime
-# drives them through `aura --serve`; point this at a v0.2-era aura binary.
-set(AMR_AURA_BIN "" CACHE FILEPATH "Path to an aura binary with std/moead")
+# Issue #4946: std/evo-core + std/moead live in Aura, not here. The default
+# transport is now Aura's in-process aura_eval_* ABI (AMR_AURA_INPROC); the
+# `aura --serve` subprocess stays as the fallback (AMR_EVO_TRANSPORT=serve).
+set(AMR_AURA_BIN "" CACHE FILEPATH "Path to an aura binary with std/moead (fallback transport)")
 if(NOT AMR_AURA_BIN)
   find_program(AMR_AURA_BIN NAMES aura)
+endif()
+
+option(AMR_AURA_INPROC "Run std/moead in-process through Aura's aura_eval_* ABI (#4946)" ON)
+set(AMR_AURA_EVAL_LIB "" CACHE FILEPATH
+    "Aura runtime library that exports aura_eval_* (build/libaura_test_objects.so)")
+set(AMR_AURA_INPROC_ENABLED OFF)
+if(AMR_AURA_INPROC)
+  if(NOT EXISTS ${AURA_SRC}/eval/aura_eval.h)
+    message(STATUS "aura::eval: ${AURA_SRC}/eval/aura_eval.h not found; falling back to --serve")
+  else()
+    if(NOT AMR_AURA_EVAL_LIB)
+      # In-tree Aura worktree layout: <root>/src + <root>/build.
+      set(AMR_AURA_EVAL_LIB ${AURA_SRC}/../build/libaura_test_objects.so)
+    endif()
+    if(EXISTS ${AMR_AURA_EVAL_LIB})
+      set(AMR_AURA_INPROC_ENABLED ON)
+      get_filename_component(AMR_AURA_EVAL_DIR ${AMR_AURA_EVAL_LIB} DIRECTORY)
+      # Test binaries must find the .so without LD_LIBRARY_PATH.
+      set(CMAKE_BUILD_RPATH ${AMR_AURA_EVAL_DIR})
+      set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+      message(STATUS "aura::eval: in-process transport ON (${AMR_AURA_EVAL_LIB})")
+    else()
+      message(STATUS "aura::eval: ${AMR_AURA_EVAL_LIB} not built; falling back to --serve")
+    endif()
+  endif()
 endif()
 
 add_library(amr STATIC
@@ -42,6 +69,14 @@ set_source_files_properties(${AURA_SRC}/core/contract_handler.cpp
   PROPERTIES COMPILE_FLAGS "-include contracts")
 target_include_directories(amr PUBLIC include ${AURA_SRC})
 target_compile_options(amr PUBLIC -fcontracts -Wall -Wextra)
+
+if(AMR_AURA_INPROC_ENABLED)
+  # Issue #4946: evo talks to std/moead in this process. PUBLIC so every test
+  # binary that links amr also links the Aura runtime that owns aura_eval_*.
+  target_compile_definitions(amr PUBLIC AMR_HAVE_AURA_EVAL=1)
+  target_compile_definitions(amr PRIVATE AMR_AURA_LIB_DIR="${AURA_SRC}/../lib")
+  target_link_libraries(amr PUBLIC ${AMR_AURA_EVAL_LIB})
+endif()
 
 enable_testing()
 foreach(t test_main_line_isolation test_abort_no_trace test_torn_writes

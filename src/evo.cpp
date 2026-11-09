@@ -1,5 +1,11 @@
 #include "amr/evo.hpp"
 
+#ifdef AMR_HAVE_AURA_EVAL
+// Issue #4946: in-process evaluation ABI (aura::eval). Linked only when the
+// build is pointed at an Aura tree that provides it (AMR_AURA_INPROC).
+#include "eval/aura_eval.h"
+#endif
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -149,6 +155,20 @@ bool ObjectiveVector::pareto_improves(const ObjectiveVector& o) const {
 // AuraEvoSession
 
 AuraEvoSession::AuraEvoSession(std::string bin, const EvoConfig& cfg) {
+#ifdef AMR_HAVE_AURA_EVAL
+    const char* transport = std::getenv("AMR_EVO_TRANSPORT");
+    const bool force_serve =
+        transport &&
+        (std::strcmp(transport, "serve") == 0 || std::strcmp(transport, "subprocess") == 0);
+    if (cfg.in_process && !force_serve) {
+        open_inproc(cfg);
+        return;
+    }
+#endif
+    open_serve(std::move(bin), cfg);
+}
+
+void AuraEvoSession::open_serve(std::string bin, const EvoConfig& cfg) {
     bin_ = !bin.empty() ? std::move(bin) : getenv_or("AMR_AURA_BIN", "");
     if (bin_.empty()) bin_ = "aura";
     if (::access(bin_.c_str(), X_OK) != 0)
@@ -184,6 +204,34 @@ AuraEvoSession::AuraEvoSession(std::string bin, const EvoConfig& cfg) {
     in_fd_ = in_pipe[1];
     out_fd_ = out_pipe[0];
 
+    prelude(cfg);
+}
+
+void AuraEvoSession::open_inproc(const EvoConfig& cfg) {
+#ifdef AMR_HAVE_AURA_EVAL
+#ifdef AMR_AURA_LIB_DIR
+    // Module search path: (require "std/x") resolves <dir>/std/x.aura.
+    if (std::getenv("AURA_PATH") == nullptr)
+        ::setenv("AURA_PATH", AMR_AURA_LIB_DIR, 1);
+    // The CLI prelude resolves stdlib the same way; keep both in step.
+    if (std::getenv("AURA_STDLIB_DIR") == nullptr)
+        ::setenv("AURA_STDLIB_DIR", AMR_AURA_LIB_DIR "/std", 1);
+#endif
+    // Leave AURA_SANDBOX alone: aura_eval_session_create applies the CLI's
+    // own default (Restricted + a Soft session grant for this process), which
+    // is what a mutating stdlib such as std/moead needs. Setting it to "off"
+    // here would disable the soft session and every hash-set! would be denied.
+    auto* s = aura_eval_session_create("amr-evo");
+    if (!s) throw std::runtime_error("aura eval session: create failed");
+    session_ = s;
+    prelude(cfg);
+#else
+    (void)cfg;
+    throw std::runtime_error("aura eval session: built without AMR_HAVE_AURA_EVAL");
+#endif
+}
+
+void AuraEvoSession::prelude(const EvoConfig& cfg) {
     // Module prelude. std/list and std/math are not on the serve prelude, and
     // std/moead uses sort/expt. The helpers only format candidate values for
     // this boundary; the search itself stays in std/moead.
@@ -201,6 +249,12 @@ AuraEvoSession::AuraEvoSession(std::string bin, const EvoConfig& cfg) {
 }
 
 AuraEvoSession::~AuraEvoSession() {
+#ifdef AMR_HAVE_AURA_EVAL
+    if (session_) {
+        aura_eval_session_destroy(static_cast<aura_eval_session*>(session_));
+        session_ = nullptr;
+    }
+#endif
     if (in_fd_ >= 0) ::close(in_fd_);
     if (out_fd_ >= 0) ::close(out_fd_);
     if (pid_ > 0) {
@@ -252,6 +306,7 @@ std::string AuraEvoSession::read_line(int timeout_ms) {
 }
 
 std::string AuraEvoSession::command(const std::string& expr) {
+    if (session_) return command_inproc(expr);
     send(expr);
     std::string line = read_line(30000);
     auto status = json_string_field(line, "\"status\":");
@@ -261,6 +316,28 @@ std::string AuraEvoSession::command(const std::string& expr) {
                                  (msg.empty() ? line : msg));
     }
     return json_string_field(line, "\"value\":");
+}
+
+// #4946: one evaluation through aura::eval. The record shapes mirror the
+// serve face (status / value, one JSON object per call), so ask/tell above
+// are transport-agnostic.
+std::string AuraEvoSession::command_inproc(const std::string& expr) {
+#ifdef AMR_HAVE_AURA_EVAL
+    char* rec = nullptr;
+    aura_eval_source(static_cast<aura_eval_session*>(session_), expr.c_str(), AURA_EVAL_LEN, &rec);
+    std::string line = rec ? rec : std::string{};
+    aura_eval_string_free(rec);
+    const auto status = json_string_field(line, "\"status\":");
+    if (status != "ok") {
+        auto msg = json_string_field(line, "\"message\":");
+        throw std::runtime_error("aura session error for '" + expr.substr(0, 80) + "': " +
+                                 (msg.empty() ? line : msg));
+    }
+    return json_string_field(line, "\"value\":");
+#else
+    (void)expr;
+    throw std::runtime_error("aura session: in-process transport not compiled in");
+#endif
 }
 
 std::vector<EvoCandidate> AuraEvoSession::ask(int k) {
