@@ -40,8 +40,45 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 | 6 | 规则改写在实验中降低成本指标，并被 promote | `test_promote_improves` | pushdown 规则让平均成本从 **3399.8 行降到 98.0 行（34.7 倍）**，质量（与基线结果的 F1）为 1.000，因此被 promote；主线总成本从 203986 降到 5883，结果完全相同，重启后依然保持。删掉 ts 过滤的坏规则质量只有 0.208，被拒绝；不命中任何计划的规则被拒绝，理由是 "no cost improvement" | ✅ |
 | + | 规则是可以查询的数据，EDSL 语义正确 | `test_rules_engine` | S-expr 往返；模式绑定；按 tier 查询规则；optimize 到达不动点并且幂等；never-auto 安全规则会屏蔽 secret；Join/Relate 和 token 预算生效 | ✅ |
 | + | tier、上限与冲突 | `test_tiers_and_limits` | never-auto 规则既不能改也不能删，实验也不能新建 never-auto 规则；needs-confirm 需要 `confirmed=true`；超过活跃 worldline 上限时抛出 `WorldlineLimit`；两个 worldline 改同一规则时先提交者赢，后者被 abort；主线在快照之后改了同名规则时 promote 冲突，改无关规则不冲突；来自未来的快照会被拒绝 | ✅ |
+| 7 | 规则集进化由 Aura `std/moead` 的 ask/tell 驱动，只 promote 帕累托改进的规则集 | `test_evo_gate`、`test_evo_moead` | 逻辑门不需要 Aura：pushdown 与 filter-through-parallel 依次被 promote（成本 3048→2060→90，33.8 倍），同答案但 sink_calls 翻倍的规则被拒，改变答案的规则被 F1 门拒绝。固定 seed 42 跑两遍，12 次决策的 transcript 逐字节相同 | ✅（边界限制见下） |
 
-最近一次本地运行（dev:v1.0.9，GCC 16.2）：**8/8 个 ctest 通过，约 3290 个检查，0 个失败**（Aura pin 升到 7bb2ed954、dev:v1.1.1 后：9/9 通过，新增 `test_soak_worldlines`）。
+最近一次本地运行（GCC 16.2，2026-11-09，Aura pin `99ddc81c9`）：**11/11 个 ctest 通过**（新增 `test_evo_gate`、`test_evo_moead`；后者需要 v0.2 aura 二进制，缺失时打印 SKIP）。此前 dev:v1.1.1 / 7bb2ed954 的 9/9 仍全部通过。
+
+## 规则集进化：std/evo-core + std/moead（#4946）
+
+MOEA/D 不在本仓库实现。`AuraEvoSession` 只把 Aura 的 ask/tell 包成本地 C++ 接口：
+
+```
+(require "std/moead" all:)
+(define amr-evo (moead:make (hash "n-obj" 3 "H" 4 "T" 5 "dim" 4
+                                  "seed" 42 "operator" "de"
+                                  "objectives" (list "cost" "tokens" "sink_calls"))))
+(moead:ask amr-evo k)                 -> 候选（id、genome、gen、slot）
+(moead:tell! amr-evo amr-cands evals) -> 权重邻域更新 / 下一代
+```
+
+搜索空间是 4 个规则开关：pushdown、filter-through-parallel、重复 sink 调用（负样本）、
+删 entity 过滤（负样本）。每个候选在现有 worldline 上执行：COW `RuleSet` 拷贝 +
+Aura fiber `Context` + overlay；目标向量取 `(cost, tokens, sink_calls)` 的每 query
+均值，质量门是相对当前主线答案的 F1。只有 F1 ≥ 1.0 且三目标帕累托改进时才
+`promote`，否则 `abort`。规则名与 tier 仍是数据，`never-auto` 安全规则不受实验影响。
+
+**边界限制（重要）**：Aura 目前只导出 `aura::core` 和 `aura::fiber_rt` 两个可链接目标
+（`docs/embedding.md`），两者都不含 Evaluator。因此 C++ 不能把 `std/moead` 链接进同一
+进程。本实现走 Aura 自己的 `--serve` 编译器会话（每行一个 JSON 回复）：算法仍然只在
+Aura 里，C++ 只发 ask/tell，但边界是进程而不是函数调用。这是 #4946 "嵌入 API" 的
+字面缺口，详细见 `docs/4946-evo-report.md`。
+
+运行方式：
+
+```bash
+cmake -S . -B build -G Ninja -DAMR_AURA_BIN=/path/to/aura
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+没有设置 `AMR_AURA_BIN` 时 `test_evo_gate` 仍跑（纯 C++ 门），`test_evo_moead`
+打印 SKIP 并通过。
 
 ## 组件
 
@@ -53,10 +90,11 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 | append log | `include/amr/log.hpp` | 32B 头：magic `AMRL`、version、type、len、seq、worldline，加 header CRC32C，后接 payload 和 payload CRC32C。`Seal` 记录携带整段的 CRC。非末尾段损坏或未封存时 fail-closed；末尾段截断到最后一条有效记录。支持 fsync/fdatasync 和故障注入 |
 | runtime | `include/amr/runtime.hpp` | 日志先写，然后 `apply_record`。live 路径和恢复路径共用同一个状态转移函数。`WlPromote` 自包含（基线版本加全部 mutation），`WlMutate` 只用于审计。checkpoint 流程是 tmp→fsync→rename→fsync(dir)，保留 2 份 |
 | fiber | `include/amr/fiber.hpp` | ucontext fiber。每次 resume 时 attach **Aura `fiber_ctx::Context`**，方式与 Aura `serve/fiber.cpp` 相同 |
+| 规则集进化 | `include/amr/evo.hpp` | Aura `std/moead` 的 ask/tell 边界；genome 是 4 个规则开关；候选在现有 worldline 上评估；只 promote 通过 F1 门且三目标帕累托改进的规则集 |
 
 ## Aura 的复用情况：哪些可以直接用，哪些缺失
 
-直接从子模块编译链接（`third_party/aura` @ `69d3600`，没有复制代码）：
+直接从子模块编译链接（`third_party/aura` @ `99ddc81c9`，没有复制代码）：
 
 | Aura 组件 | 用途 | 评价 |
 |---|---|---|
@@ -93,6 +131,8 @@ CI 工作流在 `ci/github-actions-ci.yml`。当前推送用的 token 没有 `wo
 | `intent_to_plan` + `optimize`（4 条规则） | 7.6 µs |
 
 worldline 分叉的开销与规则数无关，规则从 10 条增加到 10000 条时都在约 1 µs。深拷贝则随规则数线性增长。
+
+本机 arm64（GCC 16.2，2026-11-09，未改代码的基线）：9/9 ctest 通过；日志追加 713827 条/秒（不 fsync）、1952 条/秒（fsync）；全量恢复 70.9 ms；规则 10000 条时 begin 0.9 µs / COW 改 1 条 3.3 µs / 深拷贝 2090 µs；基线查询 13533 行、397 µs；promote 后 329 行、53.5 µs。
 
 ## 关键发现
 
