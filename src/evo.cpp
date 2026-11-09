@@ -18,7 +18,7 @@ namespace {
 constexpr const char* kPushdown = "evo-pushdown-filter";
 constexpr const char* kParallel = "evo-filter-through-parallel";
 constexpr const char* kDup = "evo-dup-retrieve";
-constexpr const char* kDropField = "evo-drop-entity-filter";
+constexpr const char* kDropAssemble = "evo-drop-assemble";
 
 // One rule pool entry. Index i is switched by genome[i] > 0.5.
 NodeId build_rule(std::size_t i) {
@@ -41,9 +41,12 @@ NodeId build_rule(std::size_t i) {
                          R"((Parallel (?r :dup "1") (?r :dup "1")))",
                          "negative control: duplicate the sink call (same ids, 2x calls)");
     case 3:
-        return make_rule(kDropField, Tier::Auto, 5, R"((Filter :field "entity" (?x)))",
+        // Removing Assemble is strictly cheaper (one fewer control-plane
+        // operator) and strictly wrong (the context is no longer budgeted),
+        // which is the clean "cheaper but invalid" quality-gate probe.
+        return make_rule(kDropAssemble, Tier::Auto, 5, R"((Assemble :as "?a" (?x)))",
                          R"((?x))",
-                         "negative control: drop the entity filter (changes answers)");
+                         "negative control: drop Assemble (cheaper, changes answers)");
     default:
         throw std::logic_error("bad rule index");
     }
@@ -306,7 +309,9 @@ void AuraEvoSession::tell(const std::vector<EvoCandidate>& cands,
 
 EvoEngine::EvoEngine(Runtime& rt, EvoConfig cfg) : rt_(rt), cfg_(std::move(cfg)) {}
 
-std::vector<std::string> EvoEngine::rule_names() { return {kPushdown, kParallel, kDup, kDropField}; }
+std::vector<std::string> EvoEngine::rule_names() {
+    return {kPushdown, kParallel, kDup, kDropAssemble};
+}
 
 std::vector<NodeId> EvoEngine::rules_for(const std::vector<double>& genome) {
     std::vector<NodeId> out(4, kNoNode);

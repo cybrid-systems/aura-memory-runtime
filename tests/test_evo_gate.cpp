@@ -48,6 +48,18 @@ TEST(explicit_genome_gate_promotes_pareto_and_aborts_the_rest) {
     EvoConfig cfg;  // no aura process is opened by evaluate()
     EvoEngine eng(*rt, cfg);
 
+    // Negative control 1: strictly cheaper and strictly wrong (no Assemble
+    // budget). This is evaluated first, against the untouched baseline, so it
+    // isolates the quality gate; it must not become a "cost improvement".
+    auto bad = eng.evaluate({0, 0, 0, 1}, qs, true);
+    std::printf("    drop-assemble: cost %.0f->%.0f tokens %.0f->%.0f sink %.0f->%.0f q=%.3f %s\n",
+                bad.baseline.cost, bad.candidate.cost, bad.baseline.tokens, bad.candidate.tokens,
+                bad.baseline.sink_calls, bad.candidate.sink_calls, bad.quality, bad.reason.c_str());
+    CHECK(!bad.promoted);
+    CHECK(bad.candidate.cost < bad.baseline.cost);
+    CHECK(bad.quality < 1.0);
+    CHECK(bad.reason.find("quality") != std::string::npos);
+
     auto d1 = eng.evaluate({1, 0, 0, 0}, qs, true);
     std::printf("    pushdown: cost %.0f->%.0f tokens %.0f->%.0f sink %.0f->%.0f q=%.3f %s\n",
                 d1.baseline.cost, d1.candidate.cost, d1.baseline.tokens, d1.candidate.tokens,
@@ -62,7 +74,7 @@ TEST(explicit_genome_gate_promotes_pareto_and_aborts_the_rest) {
     CHECK(d2.promoted);
     CHECK(d2.candidate.cost < d2.baseline.cost);
 
-    // Negative control 1: same answers, twice the sink calls -> dominated.
+    // Negative control 2: same answers, twice the sink calls -> dominated.
     auto d3 = eng.evaluate({0, 0, 1, 0}, qs, true);
     std::printf("    dup-retrieve: cost %.0f->%.0f tokens %.0f->%.0f sink %.0f->%.0f q=%.3f %s\n",
                 d3.baseline.cost, d3.candidate.cost, d3.baseline.tokens, d3.candidate.tokens,
@@ -72,15 +84,6 @@ TEST(explicit_genome_gate_promotes_pareto_and_aborts_the_rest) {
     CHECK(d3.candidate.sink_calls > d3.baseline.sink_calls);
     CHECK(d3.reason.find("pareto") != std::string::npos);
 
-    // Negative control 2: cheaper, but changes the answers -> quality gate.
-    auto d4 = eng.evaluate({0, 0, 0, 1}, qs, true);
-    std::printf("    drop-entity: cost %.0f->%.0f tokens %.0f->%.0f sink %.0f->%.0f q=%.3f %s\n",
-                d4.baseline.cost, d4.candidate.cost, d4.baseline.tokens, d4.candidate.tokens,
-                d4.baseline.sink_calls, d4.candidate.sink_calls, d4.quality, d4.reason.c_str());
-    CHECK(!d4.promoted);
-    CHECK(d4.quality < 1.0);
-    CHECK(d4.reason.find("quality") != std::string::npos);
-
     const MainView after = main_view(*rt, qs);
     std::printf("    main cost %.0f -> %.0f (%.1fx)\n", before.cost, after.cost,
                 before.cost / after.cost);
@@ -89,7 +92,7 @@ TEST(explicit_genome_gate_promotes_pareto_and_aborts_the_rest) {
     CHECK(rt->state().rules.find("evo-pushdown-filter"));
     CHECK(rt->state().rules.find("evo-filter-through-parallel"));
     CHECK(!rt->state().rules.find("evo-dup-retrieve"));
-    CHECK(!rt->state().rules.find("evo-drop-entity-filter"));
+    CHECK(!rt->state().rules.find("evo-drop-assemble"));
     CHECK(rt->active_worldlines() == 0);
 }
 
