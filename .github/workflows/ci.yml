@@ -10,11 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     # Same toolchain image as cybrid-systems/aura CI (GCC 16, C++26 contracts).
     container:
-      image: ghcr.io/cybrid-systems/dev:v1.0.9
+      image: ghcr.io/cybrid-systems/aura-ci@sha256:66392ce2a5f24668fb923d1c900c545435f6b453f3df585dc4668402c07042d5
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Orchestra baseline drift (#13)
+        run: python3 scripts/check-baseline.py
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - name: Build
